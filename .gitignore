@@ -33,3 +33,8 @@ var/**
 # temp
 pkg/**
 bak/**
+
+# Ignore test files
+*.txt
+*.ccc
+*.fasta
