@@ -230,7 +230,10 @@ class CircularChromosomeCompressor:
         # Create hash from string representation to avoid data truncation
         data_str = ','.join(str(x) for x in circular_data)
         data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:8]
-        sl_marker_code = hash(f"SL_MARKER_{data_hash}") % 65536  # 16-bit marker
+        
+        # Use stable hash instead of Python's hash() which varies between processes
+        marker_hash = hashlib.sha256(f"SL_MARKER_{data_hash}".encode('utf-8')).hexdigest()
+        sl_marker_code = int(marker_hash[:4], 16)  # Use first 4 hex chars as 16-bit marker
         
         marked_data = []
         marker_positions = []
