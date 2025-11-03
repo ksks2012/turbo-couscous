@@ -5,7 +5,7 @@ from setuptools import setup  # pylint: disable=import-error
 from setuptools import find_packages
 
 setup(name="circular-chromosome-compression",
-		version="0.0.1",
+		version="1.2.0",
 		description="",
 		packages=find_packages(),
 		install_requires=[
