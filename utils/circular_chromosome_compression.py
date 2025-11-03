@@ -91,55 +91,40 @@ class CircularChromosomeCompressor:
                 byte_array.append(int(padded_chunk, 2))
                 
         return bytes(byte_array)
-    
+        
     def dvnp_compress(self, dna_seq: str) -> Tuple[List[int], Dict[int, str]]:
         """
         DVNP-simulated compression using improved LZW-like algorithm to remove repetitive patterns.
         Inspired by dinoflagellate viral nucleoprotein condensation mechanisms.
-        
+
         Args:
             dna_seq: Input DNA sequence string
-            
+
         Returns:
             Tuple of (compressed sequence as integers, dictionary for decompression)
         """
         if not dna_seq:
             return [], {}
-            
-        # Initialize dictionary with single bases
         dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         next_code = 4
-        
-        compressed = []
-        current_pattern = ""
-        
-        for base in dna_seq:
-            new_pattern = current_pattern + base
-            
-            if new_pattern in dictionary:
-                current_pattern = new_pattern
+        current = ''
+        result = []
+        for ch in dna_seq:
+            combined = current + ch
+            if combined in dictionary:
+                current = combined
             else:
-                # Output the code for current pattern
-                if current_pattern:
-                    compressed.append(dictionary[current_pattern])
-                
-                # Standard LZW: Add ALL new patterns to dictionary
-                # Only limit dictionary growth when it gets too large
-                if next_code < 65536:  # Prevent excessive memory usage
-                    dictionary[new_pattern] = next_code
+                result.append(dictionary[current])
+                if next_code < 65536:
+                    dictionary[combined] = next_code
                     next_code += 1
-                
-                current_pattern = base
-        
-        # Output the final pattern
-        if current_pattern:
-            compressed.append(dictionary[current_pattern])
-        
-        # Create reverse dictionary for decompression
-        reverse_dict = {v: k for k, v in dictionary.items()}
-        
-        return compressed, reverse_dict
-    
+                current = ch
+        if current:
+            result.append(dictionary[current])
+
+        reverse_dict = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
+        return result, reverse_dict
+
     def dvnp_decompress(self, compressed: List[int], dictionary: Dict[int, str]) -> str:
         """
         Decompress the DVNP-compressed sequence using improved LZW decompression.
@@ -154,40 +139,24 @@ class CircularChromosomeCompressor:
         """
         if not compressed or not dictionary:
             return ""
-        
-        # Make a copy to avoid modifying the original dictionary
         work_dict = dictionary.copy()
-        next_code = max(work_dict.keys()) + 1
-        
-        # Initialize with first code
-        if compressed[0] not in work_dict:
-            return ""
-            
-        result = work_dict[compressed[0]]
-        old_string = result
-        
+        next_code = 4
+        prev = work_dict[compressed[0]]
+        result = prev
         for code in compressed[1:]:
             if code in work_dict:
-                string = work_dict[code]
+                entry = work_dict[code]
             elif code == next_code:
-                # This is the special LZW case: code refers to pattern we're about to add
-                string = old_string + old_string[0]
+                entry = prev + prev[0]
             else:
-                # Invalid code - this shouldn't happen in valid compressed data
-                print(f"Warning: Invalid code {code} encountered during decompression")
-                break
-            
-            result += string
-            
-            # Add new dictionary entry - EXACT match with compression logic
-            if next_code < 65536:  # Same limit as compression
-                work_dict[next_code] = old_string + string[0]
+                raise ValueError(f"Invalid code {code}")
+            result += entry
+            if next_code < 65536:
+                work_dict[next_code] = prev + entry[0]
                 next_code += 1
-            
-            old_string = string
-        
+            prev = entry
         return result
-    
+        
     def _next_prime(self, n: int) -> int:
         """Find the next prime number greater than or equal to n."""
         if n < 2:
