@@ -79,22 +79,22 @@ class CircularChromosomeCompressor:
         # Convert DNA to binary string
         bits = ''.join(self.reverse_mapping[base] for base in dna_seq)
         
-        # Use original length if available to avoid padding issues
-        if hasattr(self, '_original_bits_length'):
-            bits = bits[:self._original_bits_length]
-        
         # Convert binary string to bytes
         byte_array = []
         for i in range(0, len(bits), 8):
             byte_chunk = bits[i:i+8]
-            if len(byte_chunk) == 8:  # Only process complete bytes
+            if len(byte_chunk) == 8:
                 byte_array.append(int(byte_chunk, 2))
+            elif len(byte_chunk) > 0:
+                # Handle incomplete byte by padding with zeros
+                padded_chunk = byte_chunk.ljust(8, '0')
+                byte_array.append(int(padded_chunk, 2))
                 
         return bytes(byte_array)
     
     def dvnp_compress(self, dna_seq: str) -> Tuple[List[int], Dict[int, str]]:
         """
-        DVNP-simulated compression using LZW-like algorithm to remove repetitive patterns.
+        DVNP-simulated compression using improved LZW-like algorithm to remove repetitive patterns.
         Inspired by dinoflagellate viral nucleoprotein condensation mechanisms.
         
         Args:
@@ -103,6 +103,9 @@ class CircularChromosomeCompressor:
         Returns:
             Tuple of (compressed sequence as integers, dictionary for decompression)
         """
+        if not dna_seq:
+            return [], {}
+            
         # Initialize dictionary with single bases
         dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         next_code = 4
@@ -120,8 +123,9 @@ class CircularChromosomeCompressor:
                 if current_pattern:
                     compressed.append(dictionary[current_pattern])
                 
-                # Add new pattern to dictionary if it meets minimum length
-                if len(new_pattern) >= self.min_pattern_length:
+                # Standard LZW: Add ALL new patterns to dictionary
+                # Only limit dictionary growth when it gets too large
+                if next_code < 65536:  # Prevent excessive memory usage
                     dictionary[new_pattern] = next_code
                     next_code += 1
                 
@@ -138,39 +142,49 @@ class CircularChromosomeCompressor:
     
     def dvnp_decompress(self, compressed: List[int], dictionary: Dict[int, str]) -> str:
         """
-        Decompress the DVNP-compressed sequence.
+        Decompress the DVNP-compressed sequence using improved LZW decompression.
+        Must match compression logic exactly for perfect reconstruction.
         
         Args:
             compressed: List of integer codes
-            dictionary: Decompression dictionary
+            dictionary: Decompression dictionary (code -> string mapping)
             
         Returns:
             Decompressed DNA sequence string
         """
-        if not compressed:
+        if not compressed or not dictionary:
             return ""
         
-        # Initialize with first code
-        result = dictionary[compressed[0]]
-        current_pattern = result
+        # Make a copy to avoid modifying the original dictionary
+        work_dict = dictionary.copy()
+        next_code = max(work_dict.keys()) + 1
         
-        for i in range(1, len(compressed)):
-            code = compressed[i]
+        # Initialize with first code
+        if compressed[0] not in work_dict:
+            return ""
             
-            if code in dictionary:
-                new_pattern = dictionary[code]
+        result = work_dict[compressed[0]]
+        old_string = result
+        
+        for code in compressed[1:]:
+            if code in work_dict:
+                string = work_dict[code]
+            elif code == next_code:
+                # This is the special LZW case: code refers to pattern we're about to add
+                string = old_string + old_string[0]
             else:
-                # Handle case where code is not in dictionary yet
-                new_pattern = current_pattern + current_pattern[0]
+                # Invalid code - this shouldn't happen in valid compressed data
+                print(f"Warning: Invalid code {code} encountered during decompression")
+                break
             
-            result += new_pattern
+            result += string
             
-            # Add new pattern to dictionary
-            if len(current_pattern + new_pattern[0]) >= self.min_pattern_length:
-                next_code = max(dictionary.keys()) + 1
-                dictionary[next_code] = current_pattern + new_pattern[0]
+            # Add new dictionary entry - EXACT match with compression logic
+            if next_code < 65536:  # Same limit as compression
+                work_dict[next_code] = old_string + string[0]
+                next_code += 1
             
-            current_pattern = new_pattern
+            old_string = string
         
         return result
     
@@ -228,23 +242,25 @@ class CircularChromosomeCompressor:
         
         return circular_ring
     
-    def add_trans_splicing_markers(self, circular_data: List[int]) -> Tuple[List, Dict]:
+    def add_trans_splicing_markers(self, circular_data: List[int], original_compressed_length: int = None) -> Tuple[List, Dict]:
         """
         Add trans-splicing markers for error correction and decoding guidance.
         Inspired by dinoflagellate trans-splicing mechanisms.
         
         Args:
             circular_data: Circular compressed data
+            original_compressed_length: Length of original compressed data before circular encapsulation
             
         Returns:
             Tuple of (marked data, metadata for decoding)
         """
         if not circular_data:
-            return [], {'sl_marker_code': 0, 'chunk_size': self.chunk_size, 'original_length': 0, 'marker_positions': [], 'data_hash': ''}
+            return [], {'sl_marker_code': 0, 'chunk_size': self.chunk_size, 'original_length': 0, 'marker_positions': [], 'data_hash': '', 'original_compressed_length': 0}
             
-        # Generate spliced leader marker - ensure values are in byte range
-        safe_data = [x % 256 for x in circular_data]  # Ensure all values are in 0-255 range
-        data_hash = hashlib.sha256(bytes(safe_data)).hexdigest()[:8]
+        # Generate spliced leader marker - handle integer codes properly  
+        # Create hash from string representation to avoid data truncation
+        data_str = ','.join(str(x) for x in circular_data)
+        data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:8]
         sl_marker_code = hash(f"SL_MARKER_{data_hash}") % 65536  # 16-bit marker
         
         marked_data = []
@@ -267,7 +283,8 @@ class CircularChromosomeCompressor:
             'chunk_size': self.chunk_size,
             'original_length': len(circular_data),
             'marker_positions': marker_positions,
-            'data_hash': data_hash
+            'data_hash': data_hash,
+            'original_compressed_length': original_compressed_length if original_compressed_length is not None else len(circular_data)
         }
         
         return marked_data, metadata
@@ -294,8 +311,8 @@ class CircularChromosomeCompressor:
         # Step 3: Circular encapsulation
         circular_data = self.circular_encapsulate(compressed)
         
-        # Step 4: Add trans-splicing markers
-        final_data, ts_metadata = self.add_trans_splicing_markers(circular_data)
+        # Step 4: Add trans-splicing markers with original compressed length
+        final_data, ts_metadata = self.add_trans_splicing_markers(circular_data, len(compressed))
         
         # Combine all metadata
         metadata = {
@@ -330,26 +347,44 @@ class CircularChromosomeCompressor:
         # Filter out markers
         filtered_data = [x for x in compressed_data if x != marker_code]
         
-        # Remove bridge elements (circular padding)
+        # Remove bridge elements and zero padding from circular encapsulation
         original_length = ts_metadata.get('original_length', len(filtered_data))
-        circular_data = filtered_data[:original_length]
+        original_compressed_length = ts_metadata.get('original_compressed_length', original_length)
+        
+        if original_length <= len(filtered_data):
+            # Get the encapsulated data (without trans-splicing markers)
+            encapsulated_data = filtered_data[:original_length]
+            
+            # Extract only the original compressed data, excluding zero padding and bridge elements
+            circular_data = encapsulated_data[:original_compressed_length]
+        else:
+            # Fallback - shouldn't happen in normal cases
+            circular_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
         
         # Step 2: DVNP decompression
         dvnp_dict = metadata.get('dvnp_dictionary', {})
         dna_sequence = self.dvnp_decompress(circular_data, dvnp_dict)
         
         # Step 3: Convert DNA back to binary
-        # Restore original bits length to avoid padding issues
-        if 'original_bits_length' in metadata:
-            self._original_bits_length = metadata['original_bits_length']
-            
         binary_data = self.dna_to_binary(dna_sequence)
+        
+        # Ensure exact original length
+        if 'original_size' in metadata:
+            expected_size = metadata['original_size']
+            if len(binary_data) > expected_size:
+                # Truncate extra bytes
+                binary_data = binary_data[:expected_size]
+            elif len(binary_data) < expected_size:
+                # Pad with zeros if needed (this shouldn't normally happen)
+                padding_needed = expected_size - len(binary_data)
+                binary_data = binary_data + b'\x00' * padding_needed
+        
         
         return binary_data
     
     def get_compression_stats(self, original_data: bytes, compressed_data: List[int]) -> Dict:
         """
-        Calculate compression statistics and efficiency metrics.
+        Calculate compression statistics and efficiency metrics with accurate bit counting.
         
         Args:
             original_data: Original binary data
@@ -359,14 +394,29 @@ class CircularChromosomeCompressor:
             Dictionary with compression statistics
         """
         original_size = len(original_data)
-        compressed_size = len(compressed_data) * 2  # Assuming 2 bytes per int on average
+        
+        # More accurate size calculation: determine bits needed per code
+        if compressed_data:
+            max_code = max(compressed_data) if compressed_data else 0
+            bits_per_code = max(16, (max_code.bit_length() + 7) // 8 * 8)  # Round up to byte boundary, min 16-bit
+            compressed_size_bits = len(compressed_data) * bits_per_code
+            compressed_size = compressed_size_bits // 8
+        else:
+            compressed_size = 0
+            bits_per_code = 16
+        
+        # Calculate DNA sequence length for bits per base calculation
+        dna_length = original_size * 4  # 2 bits per base -> 4 bases per byte
         
         stats = {
             'original_size_bytes': original_size,
             'compressed_size_bytes': compressed_size,
             'compression_ratio': compressed_size / original_size if original_size > 0 else 0,
             'space_savings_percent': (1 - compressed_size / original_size) * 100 if original_size > 0 else 0,
-            'bits_per_base': compressed_size * 8 / (original_size * 4) if original_size > 0 else 0  # DNA has 4 possible bases
+            'bits_per_base': (compressed_size * 8) / dna_length if dna_length > 0 else 0,
+            'bits_per_code': bits_per_code,
+            'total_codes': len(compressed_data),
+            'max_code_value': max(compressed_data) if compressed_data else 0
         }
         
         return stats
