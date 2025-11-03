@@ -122,6 +122,7 @@ class CircularChromosomeCompressor:
         if current:
             result.append(dictionary[current])
 
+        # Return the initial dictionary only - the decompressor will rebuild the full dictionary
         reverse_dict = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
         return result, reverse_dict
 
@@ -226,14 +227,20 @@ class CircularChromosomeCompressor:
         if not circular_data:
             return [], {'sl_marker_code': 0, 'chunk_size': self.chunk_size, 'original_length': 0, 'marker_positions': [], 'data_hash': '', 'original_compressed_length': 0}
             
-        # Generate spliced leader marker - handle integer codes properly  
-        # Create hash from string representation to avoid data truncation
+        # Generate spliced leader marker that doesn't conflict with data
         data_str = ','.join(str(x) for x in circular_data)
         data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:8]
         
-        # Use stable hash instead of Python's hash() which varies between processes
-        marker_hash = hashlib.sha256(f"SL_MARKER_{data_hash}".encode('utf-8')).hexdigest()
-        sl_marker_code = int(marker_hash[:4], 16)  # Use first 4 hex chars as 16-bit marker
+        # Find a marker code that doesn't exist in the data
+        max_value = max(circular_data) if circular_data else 0
+        data_set = set(circular_data)
+        
+        # Start with a value guaranteed to be outside the data range
+        sl_marker_code = max_value + 1
+        
+        # Double-check it doesn't conflict (though it shouldn't)
+        while sl_marker_code in data_set:
+            sl_marker_code += 1
         
         marked_data = []
         marker_positions = []

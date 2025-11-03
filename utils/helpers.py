@@ -270,12 +270,23 @@ def benchmark_compression_speed(compressor, test_data_sizes: List[int]) -> Dict[
         Dictionary mapping data size to performance metrics
     """
     import time
+    import gc
     
     results = {}
     
     for size in test_data_sizes:
-        # Generate test data
-        test_data = bytes(range(256)) * (size // 256) + bytes(range(size % 256))
+        print(f"Benchmarking {size//1048576}MB..." if size >= 1048576 else f"Benchmarking {size//1024}KB..." if size >= 1024 else f"Benchmarking {size}B...")
+        
+        # Generate test data - use more efficient pattern for large files
+        if size >= 1048576:  # For files >= 1MB, use pattern-based generation
+            pattern_size = min(4096, size // 1000)  # Reasonable pattern size
+            pattern = bytes(range(256)) * (pattern_size // 256) + bytes(range(pattern_size % 256))
+            test_data = (pattern * (size // len(pattern))) + pattern[:size % len(pattern)]
+        else:
+            test_data = bytes(range(256)) * (size // 256) + bytes(range(size % 256))
+        
+        # Force garbage collection before benchmark
+        gc.collect()
         
         # Benchmark compression
         start_time = time.time()
@@ -291,13 +302,22 @@ def benchmark_compression_speed(compressor, test_data_sizes: List[int]) -> Dict[
         compression_throughput = size / compression_time if compression_time > 0 else 0
         decompression_throughput = size / decompression_time if decompression_time > 0 else 0
         
+        # Verify integrity
+        integrity_ok = verify_decompression_integrity(test_data, decompressed_data)
+        
         results[size] = {
             'compression_time_sec': compression_time,
             'decompression_time_sec': decompression_time,
             'compression_throughput_bytes_sec': compression_throughput,
             'decompression_throughput_bytes_sec': decompression_throughput,
             'total_time_sec': compression_time + decompression_time,
-            'integrity_verified': verify_decompression_integrity(test_data, decompressed_data)
+            'integrity_verified': integrity_ok
         }
+        
+        # Clean up memory for large files
+        del test_data
+        del compressed_data
+        del decompressed_data
+        gc.collect()
     
     return results
