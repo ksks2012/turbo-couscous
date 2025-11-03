@@ -183,7 +183,15 @@ def run_benchmark(args) -> None:
     # Define test data sizes
     test_sizes = args.test_sizes if args.test_sizes else [1024, 4096, 16384, 65536, 262144]  # 1KB to 256KB
     
-    print(f"Testing with data sizes: {[f'{size//1024}KB' if size >= 1024 else f'{size}B' for size in test_sizes]}")
+    def format_size(size):
+        if size >= 1048576:
+            return f'{size//1048576}MB'
+        elif size >= 1024:
+            return f'{size//1024}KB'
+        else:
+            return f'{size}B'
+    
+    print(f"Testing with data sizes: {[format_size(size) for size in test_sizes]}")
     
     # Run benchmarks
     results = helpers.benchmark_compression_speed(compressor, test_sizes)
@@ -193,10 +201,17 @@ def run_benchmark(args) -> None:
     print("-" * 80)
     
     for size, metrics in results.items():
-        size_str = f"{size//1024}KB" if size >= 1024 else f"{size}B"
+        size_str = format_size(size)
         comp_time = f"{metrics['compression_time_sec']:.3f}s"
         decomp_time = f"{metrics['decompression_time_sec']:.3f}s"
-        throughput = f"{metrics['compression_throughput_bytes_sec']/1024:.1f} KB/s"
+        
+        # Format throughput appropriately for large files
+        throughput_bytes_sec = metrics['compression_throughput_bytes_sec']
+        if throughput_bytes_sec >= 1048576:
+            throughput = f"{throughput_bytes_sec/1048576:.1f} MB/s"
+        else:
+            throughput = f"{throughput_bytes_sec/1024:.1f} KB/s"
+            
         integrity = "✓" if metrics['integrity_verified'] else "✗"
         
         print(f"{size_str:<10} {comp_time:<12} {decomp_time:<14} {throughput:<18} {integrity:<10}")
