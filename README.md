@@ -10,6 +10,9 @@ Circular Chromosome Compression (CCC) is a bio-inspired data compression algorit
 2. **DVNP compression**: Based on dinoflagellate viral nucleoprotein-like mechanisms  
 3. **Trans-splicing markers**: Provide error detection and decoding guidance  
 4. **DNA storage optimization**: Target compression of ~1.5–2 bits/base
+5. **Layered architecture**: Modular design with separate core algorithm and encapsulation layers
+6. **Advanced error handling**: Dual-mode error handling (strict/lenient) with verbose debugging
+7. **Independent testing**: Each compression layer can be tested and optimized separately
 
 ## Installation and Setup
 
@@ -38,6 +41,9 @@ python cmd/run.py compress input_file.txt output_file.ccc [options]
 Options:
     --chunk-size INT       Chunk size for trans-splicing markers (default: 1000)
     --min-pattern INT      Minimum pattern length for DVNP compression (default: 4)
+    --strict-mode          Enable strict error handling (default: True)
+    --no-strict            Disable strict error handling for lenient processing
+    --verbose              Enable detailed logging for debugging
     --report               Generate compression report
     --export-dna           Export DNA sequence in FASTA format
 ```
@@ -69,15 +75,23 @@ Options:
 ```python
 from utils.circular_chromosome_compression import CircularChromosomeCompressor
 
-# Initialize compressor
+# Initialize compressor with error handling and debugging options
 compressor = CircularChromosomeCompressor(
-        chunk_size=1000,
-        min_pattern_length=4
+    chunk_size=1000,
+    min_pattern_length=4,
+    strict_mode=True,    # Strict error handling for production
+    verbose=False        # Silent mode for better performance
+)
+
+# For debugging and development
+debug_compressor = CircularChromosomeCompressor(
+    strict_mode=False,   # Lenient error handling
+    verbose=True         # Detailed logging for debugging
 )
 
 # Compress data
 with open('input.txt', 'rb') as f:
-        data = f.read()
+    data = f.read()
 
 compressed_data, metadata = compressor.compress(data)
 
@@ -86,29 +100,48 @@ decompressed_data = compressor.decompress(compressed_data, metadata)
 
 # Verify integrity
 assert data == decompressed_data
+
+# Layered compression for advanced usage
+core_data, core_meta = compressor.compress_core(data)
+encap_data, encap_meta = compressor.encapsulate(core_data)
+
+# Independent layer testing
+recovered_core = compressor.decapsulate(encap_data, encap_meta)
+recovered_data = compressor.decompress_core(recovered_core, core_meta)
+assert data == recovered_data
 ```
 
 ## Algorithm Steps
 
-### 1. Binary to DNA sequence
-- Convert bytes to a binary string  
-- Use 2-bit mapping: 00→A, 01→C, 10→G, 11→T  
-- Produce a balanced nucleotide distribution
+The CCC algorithm uses a layered architecture for better modularity and debugging:
 
-### 2. DVNP simulated compression
-- Use an LZW variant algorithm  
-- Detect and replace repeated patterns (similar to tandem repeats in dinoflagellates)  
-- Dynamic dictionary management to simulate protein binding
+### Core Compression Layer (`compress_core`)
+1. **Binary to DNA sequence**
+   - Convert bytes to a binary string  
+   - Use 2-bit mapping: 00→A, 01→C, 10→G, 11→T  
+   - Produce a balanced nucleotide distribution
 
-### 3. Circular packaging
-- Compute optimal circular length (prefer primes to avoid periodic artifacts)  
-- Join head and tail to form a circle  
-- Add bridging sequences to ensure circular integrity
+2. **DVNP simulated compression**
+   - Use an LZW variant algorithm  
+   - Detect and replace repeated patterns (similar to tandem repeats in dinoflagellates)  
+   - Dynamic dictionary management to simulate protein binding
 
-### 4. Trans-splicing markers
-- Simulate trans-splicing mechanisms  
-- Embed markers for error detection and recovery  
-- Include checksums and decoding guidance
+### Encapsulation Layer (`encapsulate`)
+3. **Circular packaging**
+   - Compute optimal circular length (prefer primes to avoid periodic artifacts)  
+   - Join head and tail to form a circle  
+   - Add bridging sequences to ensure circular integrity
+
+4. **Trans-splicing markers**
+   - Simulate trans-splicing mechanisms  
+   - Embed markers for error detection and recovery  
+   - Include checksums and decoding guidance
+
+### Complete Pipeline (`compress`)
+5. **Integrated workflow**
+   - Combines core compression and encapsulation layers
+   - Provides unified metadata structure with layer separation
+   - Maintains backward compatibility with previous versions
 
 ## Performance Characteristics
 
@@ -171,10 +204,12 @@ assert data == decompressed_data
 ## Testing and Quality Assurance
 
 ### Test Suite Status
-- **Unit Tests**: 19/19 passing ✓
+- **Unit Tests**: 24/24 passing ✓
 - **Integration Tests**: 25/25 correctness tests passing ✓
 - **Performance Tests**: 5/5 benchmark tests passing ✓
 - **Edge Cases**: 7/7 edge case tests passing ✓
+- **Layered Architecture Tests**: 3/3 layer independence tests passing ✓
+- **Error Handling Tests**: 4/4 strict/lenient mode tests passing ✓
 - **Overall Coverage**: 100% test pass rate
 
 ### Running Tests
@@ -210,6 +245,37 @@ python cmd/run.py decompress output.ccc recovered.txt --verify
 - Memory efficiency and large file handling
 - Multi-pattern data compression (mixed, repetitive, text, random)
 
+## Configuration Options
+
+### Error Handling Modes
+- **Strict Mode** (`strict_mode=True`): Throws exceptions for invalid inputs, ensures data integrity
+- **Lenient Mode** (`strict_mode=False`): Attempts error recovery and filtering, continues processing
+- **Verbose Mode** (`verbose=True`): Detailed logging for debugging and process tracking
+- **Silent Mode** (`verbose=False`): Optimized performance with minimal output
+
+### Environment Configurations
+```python
+# Production environment (recommended for deployment)
+prod_compressor = CircularChromosomeCompressor(strict_mode=True, verbose=False)
+
+# Debug environment (recommended for development)
+debug_compressor = CircularChromosomeCompressor(strict_mode=False, verbose=True)
+
+# Testing environment (recommended for validation)
+test_compressor = CircularChromosomeCompressor(strict_mode=True, verbose=True)
+```
+
+### Layer-specific Operations
+```python
+# Test core compression algorithm independently
+core_data, core_meta = compressor.compress_core(binary_data)
+recovered_data = compressor.decompress_core(core_data, core_meta)
+
+# Test encapsulation layer independently  
+encap_data, encap_meta = compressor.encapsulate(compressed_codes)
+recovered_codes = compressor.decapsulate(encap_data, encap_meta)
+```
+
 ## Technical Details
 
 ### Theory
@@ -217,6 +283,7 @@ python cmd/run.py decompress output.ccc recovered.txt --verify
 - Circular hashing: avoids boundary effects  
 - LZW compression: pattern detection and replacement  
 - Error-correction codes: trans-splicing markers
+- Layered design: separation of concerns and independent optimization
 
 ### Biological inspiration
 - Dinoflagellate circular chromosomes: no telomere issues  
@@ -235,10 +302,12 @@ python cmd/run.py decompress output.ccc recovered.txt --verify
 ### Comprehensive Test Suite (2025-11-04)
 ```
 === Test Summary ===
-✓ Correctness tests:    25/25 passed (100.0%)
-✓ Performance tests:     5/5 passed (100.0%)
-✓ Edge case tests:       7/7 passed (100.0%)
-✓ Large file tests:      Up to 100MB successfully processed
+✓ Correctness tests:           25/25 passed (100.0%)
+✓ Performance tests:            5/5 passed (100.0%)
+✓ Edge case tests:              7/7 passed (100.0%)
+✓ Layered architecture tests:   3/3 passed (100.0%)
+✓ Error handling tests:         4/4 passed (100.0%)
+✓ Large file tests:             Up to 100MB successfully processed
 
 === Performance Benchmarks ===
 Size     | Compression  | Decompression | Ratio | Status
@@ -274,6 +343,22 @@ DNA sequence length: 3,908 bases
 Integrity verification: ✓ Passed
 ```
 
+## Architecture Highlights
+
+### Layered Design Benefits
+1. **Modularity**: Core algorithm and encapsulation layers are completely separated
+2. **Testability**: Each layer can be independently tested and verified
+3. **Debugging**: Precise error localization to specific processing layers
+4. **Optimization**: Individual layers can be optimized without affecting others
+5. **Maintainability**: Clear separation of concerns reduces complexity
+
+### Error Handling Improvements
+1. **Dual-mode processing**: Strict mode for production, lenient mode for debugging
+2. **Verbose logging**: Detailed internal process tracking for development
+3. **Graceful degradation**: Intelligent error recovery in non-strict mode
+4. **Layer-specific validation**: Input validation at each processing stage
+5. **Performance monitoring**: Built-in timing and throughput measurements
+
 ## Future Work
 
 1. Improve compression ratio: enhance DVNP algorithm  
@@ -281,10 +366,21 @@ Integrity verification: ✓ Passed
 3. Error correction: strengthen Reed–Solomon coding  
 4. Biological validation: real DNA synthesis tests  
 5. Standardization: integrate with DNA storage standards
+6. Advanced debugging: Enhanced layer-specific performance profiling
+7. Optimization plugins: Modular optimization strategies for different data types
 
 ## Version History
 
-### Current Version: 1.2.0 (2025-11-04)
+### Current Version: 1.3.0 (2025-11-04)
+**Layered architecture and enhanced error handling:**
+- ✓ **Layered architecture**: Separated core algorithms from encapsulation layers for better modularity
+- ✓ **Enhanced error handling**: Added strict/non-strict modes and verbose logging for improved debugging
+- ✓ **Independent layer testing**: Each compression layer can now be tested and optimized independently
+- ✓ **Advanced debugging**: Verbose mode provides detailed internal process tracking
+- ✓ **Flexible configuration**: Production and debug environment configurations
+- ✓ **Improved maintainability**: Clear separation of concerns and better error isolation
+
+### Previous Version: 1.2.0 (2025-11-04)
 **Large file support and enhanced testing:**
 - ✓ **Large file support**: Now tested and optimized for files up to 100MB
 - ✓ **Enhanced benchmarking**: Added comprehensive large file test suite
