@@ -18,20 +18,40 @@ class CircularChromosomeCompressor:
     dinoflagellate chromosomes with DVNP-like compression and trans-splicing.
     """
     
-    def __init__(self, chunk_size: int = 1000, min_pattern_length: int = 4):
+    def __init__(self, chunk_size: int = 1000, min_pattern_length: int = 4, 
+                 strict_mode: bool = True, verbose: bool = False):
         """
         Initialize the compressor with configuration parameters.
         
         Args:
             chunk_size: Size of chunks for trans-splicing markers
             min_pattern_length: Minimum length for pattern detection in DVNP compression
+            strict_mode: If True, raise exceptions for invalid inputs; if False, return defaults
+            verbose: If True, print debugging information during processing
         """
         self.chunk_size = chunk_size
         self.min_pattern_length = min_pattern_length
+        self.strict_mode = strict_mode
+        self.verbose = verbose
         self.base_mapping = {'00': 'A', '01': 'C', '10': 'G', '11': 'T'}
         self.reverse_mapping = {'A': '00', 'C': '01', 'G': '10', 'T': '11'}
         # Fixed base dictionary for DVNP compression/decompression symmetry
         self._base_dict = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
+        
+    def _log(self, message: str):
+        """Log debug information if verbose mode is enabled."""
+        if self.verbose:
+            print(f"[CCC] {message}")
+    
+    def _validate_input(self, data, data_name: str):
+        """Validate input data and handle according to strict_mode."""
+        if not data:
+            if self.strict_mode:
+                raise ValueError(f"Missing or empty {data_name}")
+            else:
+                self._log(f"Warning: Missing or empty {data_name}, returning default")
+                return False
+        return True
         
     def binary_to_dna(self, binary_data: bytes) -> Seq:
         """
@@ -44,8 +64,10 @@ class CircularChromosomeCompressor:
         Returns:
             Bio.Seq object containing DNA sequence
         """
-        if not binary_data:
+        if not self._validate_input(binary_data, "binary_data"):
             return Seq("")
+            
+        self._log(f"Converting {len(binary_data)} bytes to DNA sequence")
             
         # Convert bytes to binary string
         bits = ''.join(f'{byte:08b}' for byte in binary_data)
@@ -63,6 +85,7 @@ class CircularChromosomeCompressor:
             for i in range(0, len(bits), 2)
         )
         
+        self._log(f"Generated DNA sequence of length {len(dna_sequence)}")
         return Seq(dna_sequence)
     
     def dna_to_binary(self, dna_seq: str) -> bytes:
@@ -75,11 +98,32 @@ class CircularChromosomeCompressor:
         Returns:
             Original binary data as bytes
         """
-        if not dna_seq:
+        if not self._validate_input(dna_seq, "dna_seq"):
             return b""
             
+        self._log(f"Converting DNA sequence of length {len(dna_seq)} back to binary")
+        
+        # Validate DNA sequence contains only valid bases
+        valid_bases = set('ACGT')
+        invalid_bases = set(dna_seq.upper()) - valid_bases
+        if invalid_bases:
+            error_msg = f"Invalid DNA bases found: {invalid_bases}"
+            if self.strict_mode:
+                raise ValueError(error_msg)
+            else:
+                self._log(f"Warning: {error_msg}, filtering them out")
+                dna_seq = ''.join(base for base in dna_seq.upper() if base in valid_bases)
+            
         # Convert DNA to binary string
-        bits = ''.join(self.reverse_mapping[base] for base in dna_seq)
+        try:
+            bits = ''.join(self.reverse_mapping[base.upper()] for base in dna_seq)
+        except KeyError as e:
+            error_msg = f"Invalid DNA base encountered: {e}"
+            if self.strict_mode:
+                raise ValueError(error_msg)
+            else:
+                self._log(f"Warning: {error_msg}")
+                return b""
         
         # Convert binary string to bytes
         byte_array = []
@@ -105,8 +149,10 @@ class CircularChromosomeCompressor:
         Returns:
             Compressed sequence as list of integers
         """
-        if not dna_seq:
+        if not self._validate_input(dna_seq, "dna_seq"):
             return []
+            
+        self._log(f"Starting DVNP compression on sequence of length {len(dna_seq)}")
         dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         next_code = 4
         current = ''
@@ -124,6 +170,7 @@ class CircularChromosomeCompressor:
         if current:
             result.append(dictionary[current])
 
+        self._log(f"DVNP compression completed: {len(dna_seq)} chars → {len(result)} codes")
         return result
 
     def dvnp_decompress(self, compressed: List[int]) -> str:
@@ -138,8 +185,10 @@ class CircularChromosomeCompressor:
         Returns:
             Decompressed DNA sequence string
         """
-        if not compressed:
+        if not self._validate_input(compressed, "compressed codes"):
             return ""
+            
+        self._log(f"Starting DVNP decompression on {len(compressed)} codes")
         work_dict = self._base_dict.copy()
         next_code = 4
         prev = work_dict[compressed[0]]
@@ -150,12 +199,19 @@ class CircularChromosomeCompressor:
             elif code == next_code:
                 entry = prev + prev[0]
             else:
-                raise ValueError(f"Invalid code {code}")
+                error_msg = f"Invalid code {code} in DVNP decompression"
+                if self.strict_mode:
+                    raise ValueError(error_msg)
+                else:
+                    self._log(f"Warning: {error_msg}, skipping")
+                    continue
             result += entry
             if next_code < 65536:
                 work_dict[next_code] = prev + entry[0]
                 next_code += 1
             prev = entry
+        
+        self._log(f"DVNP decompression completed: {len(compressed)} codes → {len(result)} chars")
         return result
         
     def _next_prime(self, n: int) -> int:
@@ -192,24 +248,31 @@ class CircularChromosomeCompressor:
         Returns:
             Circular-ready sequence with bridge elements
         """
-        if not compressed:
+        if not self._validate_input(compressed, "compressed data"):
             return compressed
         
         length = len(compressed)
+        self._log(f"Starting circular encapsulation for {length} codes")
         
         # Find next prime for optimal ring size to avoid periodic artifacts
         prime_length = self._next_prime(length)
+        padding_size = prime_length - length
+        
+        self._log(f"Circular padding size = {padding_size} (prime length: {prime_length})")
         
         # Pad with zeros if needed
-        padded = compressed + [0] * (prime_length - length)
+        padded = compressed + [0] * padding_size
         
         # Create bridge for circular continuity
         bridge_length = min(int(math.sqrt(prime_length)), 10)
         bridge = padded[:bridge_length]
         
+        self._log(f"Bridge length = {bridge_length}")
+        
         # Create circular structure
         circular_ring = padded + bridge
         
+        self._log(f"Circular encapsulation completed: {length} → {len(circular_ring)} codes")
         return circular_ring
     
     def add_trans_splicing_markers(self, circular_data: List[int], original_compressed_length: int = None) -> Tuple[List, Dict]:
@@ -278,8 +341,10 @@ class CircularChromosomeCompressor:
         Returns:
             Tuple of (DVNP compressed data, core metadata)
         """
-        if not binary_data:
+        if not self._validate_input(binary_data, "binary_data"):
             return [], {'dna_length': 0, 'original_size': 0, 'original_bits_length': 0}
+            
+        self._log(f"Starting core compression for {len(binary_data)} bytes")
         
         # Step 1: Convert binary to DNA
         dna_seq = self.binary_to_dna(binary_data)
@@ -306,7 +371,7 @@ class CircularChromosomeCompressor:
         Returns:
             Tuple of (encapsulated data with markers, encapsulation metadata)
         """
-        if not compressed:
+        if not self._validate_input(compressed, "compressed data"):
             return [], {'circular_length': 0, 'trans_splicing': {}}
         
         # Step 1: Circular encapsulation
@@ -333,7 +398,7 @@ class CircularChromosomeCompressor:
         Returns:
             Tuple of (compressed data, complete metadata for decompression)
         """
-        if not binary_data:
+        if not self._validate_input(binary_data, "binary_data"):
             return [], {
                 'core': {'dna_length': 0, 'original_size': 0, 'original_bits_length': 0},
                 'encapsulation': {'circular_length': 0, 'trans_splicing': {}},
@@ -403,8 +468,11 @@ class CircularChromosomeCompressor:
         Returns:
             Original binary data
         """
-        if not compressed:
+        if not self._validate_input(compressed, "compressed codes") or \
+           not self._validate_input(core_metadata, "core_metadata"):
             return b""
+            
+        self._log(f"Starting core decompression for {len(compressed)} codes")
             
         # Step 1: DVNP decompression
         dna_sequence = self.dvnp_decompress(compressed)
@@ -435,8 +503,11 @@ class CircularChromosomeCompressor:
         Returns:
             Original binary data
         """
-        if not compressed_data or not metadata:
+        if not self._validate_input(compressed_data, "compressed_data") or \
+           not self._validate_input(metadata, "metadata"):
             return b""
+            
+        self._log(f"Starting decompression for {len(compressed_data)} codes")
         
         # Support both new layered metadata and legacy flat metadata
         if 'core' in metadata and 'encapsulation' in metadata:
