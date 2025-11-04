@@ -145,12 +145,18 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
     
     def test_empty_data_handling(self):
         """Test handling of empty input data."""
+        # Test with non-strict mode for empty data handling
+        lenient_compressor = CircularChromosomeCompressor(strict_mode=False)
         empty_data = b""
         
-        compressed, metadata = self.compressor.compress(empty_data)
-        decompressed = self.compressor.decompress(compressed, metadata)
+        compressed, metadata = lenient_compressor.compress(empty_data)
+        decompressed = lenient_compressor.decompress(compressed, metadata)
         
         self.assertEqual(decompressed, empty_data)
+        
+        # Test that strict mode raises appropriate errors
+        with self.assertRaises(ValueError):
+            self.compressor.compress(empty_data)
     
     def test_compression_statistics(self):
         """Test compression statistics calculation."""
@@ -260,6 +266,64 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
         # Should work with new layered format
         decompressed = self.compressor.decompress(compressed, metadata)
         self.assertEqual(decompressed, test_data)
+        
+    def test_error_handling_modes(self):
+        """Test strict and non-strict error handling modes."""
+        # Test strict mode (default)
+        strict_compressor = CircularChromosomeCompressor(strict_mode=True)
+        
+        # Should raise error for empty input in strict mode
+        with self.assertRaises(ValueError):
+            strict_compressor._validate_input(None, "test_data")
+            
+        with self.assertRaises(ValueError):
+            strict_compressor._validate_input([], "test_list")
+            
+        # Test non-strict mode
+        lenient_compressor = CircularChromosomeCompressor(strict_mode=False)
+        
+        # Should return False for empty input in non-strict mode
+        self.assertFalse(lenient_compressor._validate_input(None, "test_data"))
+        self.assertFalse(lenient_compressor._validate_input([], "test_list"))
+        
+    def test_verbose_mode(self):
+        """Test verbose logging functionality."""
+        import io
+        import sys
+        
+        # Capture stdout
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+        
+        # Test with verbose mode
+        verbose_compressor = CircularChromosomeCompressor(verbose=True)
+        test_data = b"Verbose test!"
+        
+        compressed, metadata = verbose_compressor.compress(test_data)
+        
+        # Restore stdout
+        sys.stdout = sys.__stdout__
+        
+        # Check that log messages were printed
+        output = captured_output.getvalue()
+        self.assertIn('[CCC]', output)
+        self.assertIn('Starting core compression', output)
+        
+    def test_invalid_dna_handling(self):
+        """Test handling of invalid DNA sequences in different modes."""
+        # Test strict mode
+        strict_compressor = CircularChromosomeCompressor(strict_mode=True)
+        invalid_dna = "ACGTXYZ"
+        
+        with self.assertRaises(ValueError):
+            strict_compressor.dna_to_binary(invalid_dna)
+            
+        # Test non-strict mode
+        lenient_compressor = CircularChromosomeCompressor(strict_mode=False)
+        
+        # Should filter invalid bases and continue
+        result = lenient_compressor.dna_to_binary(invalid_dna)
+        self.assertIsInstance(result, bytes)
 
 
 class TestHelperFunctions(unittest.TestCase):
