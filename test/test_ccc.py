@@ -64,16 +64,15 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
         # Convert test data to DNA first
         dna_seq = str(self.compressor.binary_to_dna(self.repeated_data))
         
-        # Compress
-        compressed, dictionary = self.compressor.dvnp_compress(dna_seq)
+        # Compress (now only returns compressed data)
+        compressed = self.compressor.dvnp_compress(dna_seq)
         
         # For LZW-style compression, may not always compress short repeated patterns
         # Just verify decompression works correctly
         self.assertIsInstance(compressed, list)
-        self.assertIsInstance(dictionary, dict)
         
-        # Decompress
-        decompressed = self.compressor.dvnp_decompress(compressed, dictionary)
+        # Decompress (now uses internal _base_dict)
+        decompressed = self.compressor.dvnp_decompress(compressed)
         
         # Should match original
         self.assertEqual(decompressed, dna_seq)
@@ -124,8 +123,7 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
                 # Compress
                 compressed, metadata = self.compressor.compress(test_data)
                 
-                # Verify metadata structure
-                self.assertIn('dvnp_dictionary', metadata)
+                # Verify metadata structure (dvnp_dictionary no longer needed)
                 self.assertIn('trans_splicing', metadata)
                 self.assertIn('original_size', metadata)
                 self.assertEqual(metadata['original_size'], len(test_data))
