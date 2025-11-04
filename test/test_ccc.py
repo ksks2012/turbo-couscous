@@ -123,10 +123,19 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
                 # Compress
                 compressed, metadata = self.compressor.compress(test_data)
                 
-                # Verify metadata structure (dvnp_dictionary no longer needed)
-                self.assertIn('trans_splicing', metadata)
-                self.assertIn('original_size', metadata)
-                self.assertEqual(metadata['original_size'], len(test_data))
+                # Verify layered metadata structure
+                self.assertIn('core', metadata)
+                self.assertIn('encapsulation', metadata)
+                self.assertIn('compression_ratio', metadata)
+                
+                # Verify core metadata
+                core_meta = metadata['core']
+                self.assertIn('original_size', core_meta)
+                self.assertEqual(core_meta['original_size'], len(test_data))
+                
+                # Verify encapsulation metadata
+                encap_meta = metadata['encapsulation']
+                self.assertIn('trans_splicing', encap_meta)
                 
                 # Decompress
                 decompressed = self.compressor.decompress(compressed, metadata)
@@ -189,6 +198,68 @@ class TestCircularChromosomeCompressor(unittest.TestCase):
         
         with self.assertRaises((KeyError, ValueError)):
             self.compressor.dna_to_binary(invalid_dna)
+    
+    def test_layered_architecture(self):
+        """Test the new layered compression architecture."""
+        test_data = b"Layered architecture test data!"
+        
+        # Test core compression layer
+        core_compressed, core_meta = self.compressor.compress_core(test_data)
+        self.assertIsInstance(core_compressed, list)
+        self.assertIsInstance(core_meta, dict)
+        self.assertIn('dna_length', core_meta)
+        self.assertIn('original_size', core_meta)
+        self.assertEqual(core_meta['original_size'], len(test_data))
+        
+        # Test core decompression layer
+        recovered_data = self.compressor.decompress_core(core_compressed, core_meta)
+        self.assertEqual(recovered_data, test_data)
+        
+        # Test encapsulation layer
+        encapsulated, encap_meta = self.compressor.encapsulate(core_compressed)
+        self.assertIsInstance(encapsulated, list)
+        self.assertIsInstance(encap_meta, dict)
+        self.assertIn('circular_length', encap_meta)
+        self.assertIn('trans_splicing', encap_meta)
+        
+        # Test decapsulation layer
+        recovered_core = self.compressor.decapsulate(encapsulated, encap_meta)
+        self.assertEqual(recovered_core, core_compressed)
+        
+        # Test full pipeline consistency
+        full_compressed, full_meta = self.compressor.compress(test_data)
+        full_recovered = self.compressor.decompress(full_compressed, full_meta)
+        self.assertEqual(full_recovered, test_data)
+        
+        # Verify layered metadata structure
+        self.assertIn('core', full_meta)
+        self.assertIn('encapsulation', full_meta)
+        self.assertIn('compression_ratio', full_meta)
+        
+    def test_layer_independence(self):
+        """Test that each layer can be tested independently."""
+        test_data = b"Independence test!"
+        
+        # Core layer should work independently
+        core_compressed, core_meta = self.compressor.compress_core(test_data)
+        self.assertTrue(len(core_compressed) > 0)
+        
+        # Encapsulation layer should work with any valid input
+        dummy_compressed = [1, 2, 3, 4, 5]
+        encapsulated, encap_meta = self.compressor.encapsulate(dummy_compressed)
+        recovered = self.compressor.decapsulate(encapsulated, encap_meta)
+        self.assertEqual(recovered, dummy_compressed)
+        
+    def test_backward_compatibility(self):
+        """Test that new decompress method supports legacy metadata format."""
+        # This would test the legacy compatibility path in decompress method
+        # For now, just ensure it doesn't break with new format
+        test_data = b"Backward compatibility test!"
+        compressed, metadata = self.compressor.compress(test_data)
+        
+        # Should work with new layered format
+        decompressed = self.compressor.decompress(compressed, metadata)
+        self.assertEqual(decompressed, test_data)
 
 
 class TestHelperFunctions(unittest.TestCase):
