@@ -268,18 +268,18 @@ class CircularChromosomeCompressor:
         
         return marked_data, metadata
     
-    def compress(self, binary_data: bytes) -> Tuple[List[int], Dict]:
+    def compress_core(self, binary_data: bytes) -> Tuple[List[int], Dict]:
         """
-        Complete compression pipeline using circular chromosome approach.
+        Core compression algorithm layer: Binary → DNA → DVNP compression.
         
         Args:
             binary_data: Input binary data
             
         Returns:
-            Tuple of (compressed data, metadata for decompression)
+            Tuple of (DVNP compressed data, core metadata)
         """
         if not binary_data:
-            return [], {'trans_splicing': {}, 'original_size': 0, 'dna_length': 0, 'compression_ratio': 0, 'original_bits_length': 0}
+            return [], {'dna_length': 0, 'original_size': 0, 'original_bits_length': 0}
         
         # Step 1: Convert binary to DNA
         dna_seq = self.binary_to_dna(binary_data)
@@ -287,26 +287,146 @@ class CircularChromosomeCompressor:
         # Step 2: DVNP compression
         compressed = self.dvnp_compress(str(dna_seq))
         
-        # Step 3: Circular encapsulation
+        # Core layer metadata
+        core_metadata = {
+            'dna_length': len(dna_seq),
+            'original_size': len(binary_data),
+            'original_bits_length': getattr(self, '_original_bits_length', len(binary_data) * 8)
+        }
+        
+        return compressed, core_metadata
+    
+    def encapsulate(self, compressed: List[int]) -> Tuple[List[int], Dict]:
+        """
+        Encapsulation layer: Circular encapsulation + Trans-splicing markers.
+        
+        Args:
+            compressed: DVNP compressed data from compress_core()
+            
+        Returns:
+            Tuple of (encapsulated data with markers, encapsulation metadata)
+        """
+        if not compressed:
+            return [], {'circular_length': 0, 'trans_splicing': {}}
+        
+        # Step 1: Circular encapsulation
         circular_data = self.circular_encapsulate(compressed)
         
-        # Step 4: Add trans-splicing markers with original compressed length
-        final_data, ts_metadata = self.add_trans_splicing_markers(circular_data, len(compressed))
+        # Step 2: Add trans-splicing markers
+        marked_data, ts_metadata = self.add_trans_splicing_markers(circular_data, len(compressed))
         
-        # Combine all metadata (no need to store dvnp_dictionary anymore)
+        # Encapsulation layer metadata
+        encap_metadata = {
+            'circular_length': len(circular_data),
+            'trans_splicing': ts_metadata
+        }
+        
+        return marked_data, encap_metadata
+    
+    def compress(self, binary_data: bytes) -> Tuple[List[int], Dict]:
+        """
+        Complete compression pipeline using layered architecture.
+        
+        Args:
+            binary_data: Input binary data
+            
+        Returns:
+            Tuple of (compressed data, complete metadata for decompression)
+        """
+        if not binary_data:
+            return [], {
+                'core': {'dna_length': 0, 'original_size': 0, 'original_bits_length': 0},
+                'encapsulation': {'circular_length': 0, 'trans_splicing': {}},
+                'compression_ratio': 0
+            }
+        
+        # Layer 1: Core compression
+        compressed, core_metadata = self.compress_core(binary_data)
+        
+        # Layer 2: Encapsulation
+        final_data, encap_metadata = self.encapsulate(compressed)
+        
+        # Combine metadata from all layers
         metadata = {
-            'trans_splicing': ts_metadata,
-            'original_size': len(binary_data),
-            'dna_length': len(dna_seq),
-            'compression_ratio': len(final_data) / len(binary_data) if binary_data else 0,
-            'original_bits_length': getattr(self, '_original_bits_length', len(binary_data) * 8)
+            'core': core_metadata,
+            'encapsulation': encap_metadata,
+            'compression_ratio': len(final_data) / len(binary_data) if binary_data else 0
         }
         
         return final_data, metadata
     
+    def decapsulate(self, marked_data: List[int], encap_metadata: Dict) -> List[int]:
+        """
+        Decapsulation layer: Remove trans-splicing markers and circular encapsulation.
+        
+        Args:
+            marked_data: Data with trans-splicing markers
+            encap_metadata: Encapsulation metadata
+            
+        Returns:
+            Original DVNP compressed data
+        """
+        if not marked_data or not encap_metadata:
+            return []
+            
+        # Step 1: Remove trans-splicing markers
+        ts_metadata = encap_metadata.get('trans_splicing', {})
+        marker_code = ts_metadata.get('sl_marker_code', 0)
+        
+        # Filter out markers
+        filtered_data = [x for x in marked_data if x != marker_code]
+        
+        # Step 2: Remove bridge elements and zero padding from circular encapsulation
+        original_length = ts_metadata.get('original_length', len(filtered_data))
+        original_compressed_length = ts_metadata.get('original_compressed_length', original_length)
+        
+        if original_length <= len(filtered_data):
+            # Get the encapsulated data (without trans-splicing markers)
+            encapsulated_data = filtered_data[:original_length]
+            
+            # Extract only the original compressed data, excluding zero padding and bridge elements
+            core_data = encapsulated_data[:original_compressed_length]
+        else:
+            # Fallback - shouldn't happen in normal cases
+            core_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
+        
+        return core_data
+    
+    def decompress_core(self, compressed: List[int], core_metadata: Dict) -> bytes:
+        """
+        Core decompression algorithm layer: DVNP decompression → DNA → Binary.
+        
+        Args:
+            compressed: DVNP compressed data
+            core_metadata: Core metadata
+            
+        Returns:
+            Original binary data
+        """
+        if not compressed:
+            return b""
+            
+        # Step 1: DVNP decompression
+        dna_sequence = self.dvnp_decompress(compressed)
+        
+        # Step 2: Convert DNA back to binary
+        binary_data = self.dna_to_binary(dna_sequence)
+        
+        # Step 3: Ensure exact original length
+        expected_size = core_metadata.get('original_size', len(binary_data))
+        if len(binary_data) > expected_size:
+            # Truncate extra bytes
+            binary_data = binary_data[:expected_size]
+        elif len(binary_data) < expected_size:
+            # Pad with zeros if needed (this shouldn't normally happen)
+            padding_needed = expected_size - len(binary_data)
+            binary_data = binary_data + b'\x00' * padding_needed
+        
+        return binary_data
+    
     def decompress(self, compressed_data: List[int], metadata: Dict) -> bytes:
         """
-        Complete decompression pipeline.
+        Complete decompression pipeline using layered architecture.
         
         Args:
             compressed_data: Compressed data from compress()
@@ -317,45 +437,50 @@ class CircularChromosomeCompressor:
         """
         if not compressed_data or not metadata:
             return b""
+        
+        # Support both new layered metadata and legacy flat metadata
+        if 'core' in metadata and 'encapsulation' in metadata:
+            # New layered metadata structure
+            core_metadata = metadata['core']
+            encap_metadata = metadata['encapsulation']
             
-        # Step 1: Remove trans-splicing markers
-        ts_metadata = metadata.get('trans_splicing', {})
-        marker_code = ts_metadata.get('sl_marker_code', 0)
-        
-        # Filter out markers
-        filtered_data = [x for x in compressed_data if x != marker_code]
-        
-        # Remove bridge elements and zero padding from circular encapsulation
-        original_length = ts_metadata.get('original_length', len(filtered_data))
-        original_compressed_length = ts_metadata.get('original_compressed_length', original_length)
-        
-        if original_length <= len(filtered_data):
-            # Get the encapsulated data (without trans-splicing markers)
-            encapsulated_data = filtered_data[:original_length]
+            # Layer 1: Decapsulation
+            core_data = self.decapsulate(compressed_data, encap_metadata)
             
-            # Extract only the original compressed data, excluding zero padding and bridge elements
-            circular_data = encapsulated_data[:original_compressed_length]
+            # Layer 2: Core decompression
+            binary_data = self.decompress_core(core_data, core_metadata)
+            
         else:
-            # Fallback - shouldn't happen in normal cases
-            circular_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
-        
-        # Step 2: DVNP decompression
-        dna_sequence = self.dvnp_decompress(circular_data)
-        
-        # Step 3: Convert DNA back to binary
-        binary_data = self.dna_to_binary(dna_sequence)
-        
-        # Ensure exact original length
-        if 'original_size' in metadata:
-            expected_size = metadata['original_size']
+            # Legacy flat metadata structure for backward compatibility
+            ts_metadata = metadata.get('trans_splicing', {})
+            marker_code = ts_metadata.get('sl_marker_code', 0)
+            
+            # Filter out markers
+            filtered_data = [x for x in compressed_data if x != marker_code]
+            
+            # Remove bridge elements and zero padding
+            original_length = ts_metadata.get('original_length', len(filtered_data))
+            original_compressed_length = ts_metadata.get('original_compressed_length', original_length)
+            
+            if original_length <= len(filtered_data):
+                encapsulated_data = filtered_data[:original_length]
+                circular_data = encapsulated_data[:original_compressed_length]
+            else:
+                circular_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
+            
+            # DVNP decompression
+            dna_sequence = self.dvnp_decompress(circular_data)
+            
+            # Convert DNA back to binary
+            binary_data = self.dna_to_binary(dna_sequence)
+            
+            # Ensure exact original length
+            expected_size = metadata.get('original_size', len(binary_data))
             if len(binary_data) > expected_size:
-                # Truncate extra bytes
                 binary_data = binary_data[:expected_size]
             elif len(binary_data) < expected_size:
-                # Pad with zeros if needed (this shouldn't normally happen)
                 padding_needed = expected_size - len(binary_data)
                 binary_data = binary_data + b'\x00' * padding_needed
-        
         
         return binary_data
     
