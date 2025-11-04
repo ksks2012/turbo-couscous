@@ -30,6 +30,8 @@ class CircularChromosomeCompressor:
         self.min_pattern_length = min_pattern_length
         self.base_mapping = {'00': 'A', '01': 'C', '10': 'G', '11': 'T'}
         self.reverse_mapping = {'A': '00', 'C': '01', 'G': '10', 'T': '11'}
+        # Fixed base dictionary for DVNP compression/decompression symmetry
+        self._base_dict = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
         
     def binary_to_dna(self, binary_data: bytes) -> Seq:
         """
@@ -92,7 +94,7 @@ class CircularChromosomeCompressor:
                 
         return bytes(byte_array)
         
-    def dvnp_compress(self, dna_seq: str) -> Tuple[List[int], Dict[int, str]]:
+    def dvnp_compress(self, dna_seq: str) -> List[int]:
         """
         DVNP-simulated compression using improved LZW-like algorithm to remove repetitive patterns.
         Inspired by dinoflagellate viral nucleoprotein condensation mechanisms.
@@ -101,10 +103,10 @@ class CircularChromosomeCompressor:
             dna_seq: Input DNA sequence string
 
         Returns:
-            Tuple of (compressed sequence as integers, dictionary for decompression)
+            Compressed sequence as list of integers
         """
         if not dna_seq:
-            return [], {}
+            return []
         dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         next_code = 4
         current = ''
@@ -122,25 +124,23 @@ class CircularChromosomeCompressor:
         if current:
             result.append(dictionary[current])
 
-        # Return the initial dictionary only - the decompressor will rebuild the full dictionary
-        reverse_dict = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
-        return result, reverse_dict
+        return result
 
-    def dvnp_decompress(self, compressed: List[int], dictionary: Dict[int, str]) -> str:
+    def dvnp_decompress(self, compressed: List[int]) -> str:
         """
         Decompress the DVNP-compressed sequence using improved LZW decompression.
         Must match compression logic exactly for perfect reconstruction.
+        Uses the fixed base dictionary for symmetry with compression.
         
         Args:
             compressed: List of integer codes
-            dictionary: Decompression dictionary (code -> string mapping)
             
         Returns:
             Decompressed DNA sequence string
         """
-        if not compressed or not dictionary:
+        if not compressed:
             return ""
-        work_dict = dictionary.copy()
+        work_dict = self._base_dict.copy()
         next_code = 4
         prev = work_dict[compressed[0]]
         result = prev
@@ -279,13 +279,13 @@ class CircularChromosomeCompressor:
             Tuple of (compressed data, metadata for decompression)
         """
         if not binary_data:
-            return [], {'dvnp_dictionary': {}, 'trans_splicing': {}, 'original_size': 0, 'dna_length': 0, 'compression_ratio': 0, 'original_bits_length': 0}
+            return [], {'trans_splicing': {}, 'original_size': 0, 'dna_length': 0, 'compression_ratio': 0, 'original_bits_length': 0}
         
         # Step 1: Convert binary to DNA
         dna_seq = self.binary_to_dna(binary_data)
         
         # Step 2: DVNP compression
-        compressed, dvnp_dict = self.dvnp_compress(str(dna_seq))
+        compressed = self.dvnp_compress(str(dna_seq))
         
         # Step 3: Circular encapsulation
         circular_data = self.circular_encapsulate(compressed)
@@ -293,9 +293,8 @@ class CircularChromosomeCompressor:
         # Step 4: Add trans-splicing markers with original compressed length
         final_data, ts_metadata = self.add_trans_splicing_markers(circular_data, len(compressed))
         
-        # Combine all metadata
+        # Combine all metadata (no need to store dvnp_dictionary anymore)
         metadata = {
-            'dvnp_dictionary': dvnp_dict,
             'trans_splicing': ts_metadata,
             'original_size': len(binary_data),
             'dna_length': len(dna_seq),
@@ -341,8 +340,7 @@ class CircularChromosomeCompressor:
             circular_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
         
         # Step 2: DVNP decompression
-        dvnp_dict = metadata.get('dvnp_dictionary', {})
-        dna_sequence = self.dvnp_decompress(circular_data, dvnp_dict)
+        dna_sequence = self.dvnp_decompress(circular_data)
         
         # Step 3: Convert DNA back to binary
         binary_data = self.dna_to_binary(dna_sequence)
