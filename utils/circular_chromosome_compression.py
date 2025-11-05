@@ -8,6 +8,7 @@ to optimize storage density and enable efficient access patterns.
 
 import hashlib
 import math
+from collections import Counter
 from typing import List, Dict, Tuple, Optional
 from Bio.Seq import Seq
 
@@ -52,6 +53,34 @@ class CircularChromosomeCompressor:
                 self._log(f"Warning: Missing or empty {data_name}, returning default")
                 return False
         return True
+    
+    def _entropy(self, data: bytes) -> float:
+        """
+        Calculate Shannon entropy of binary data.
+        
+        Args:
+            data: Input binary data
+            
+        Returns:
+            Shannon entropy in bits per byte
+        """
+        if not data:
+            return 0.0
+        
+        # Count frequency of each byte value
+        freq = Counter(data)
+        total = len(data)
+        
+        # Calculate Shannon entropy: H = -Σ(p * log2(p))
+        # Handle the case where probability = 1 (all data same)
+        entropy = 0.0
+        for count in freq.values():
+            probability = count / total
+            if probability > 0:  # Avoid log(0)
+                entropy -= probability * math.log2(probability)
+        
+        self._log(f"Shannon entropy calculated: {entropy:.3f} bits/byte")
+        return entropy
         
     def binary_to_dna(self, binary_data: bytes) -> Seq:
         """
@@ -555,18 +584,25 @@ class CircularChromosomeCompressor:
         
         return binary_data
     
-    def get_compression_stats(self, original_data: bytes, compressed_data: List[int]) -> Dict:
+    def get_compression_stats(self, original_data: bytes, compressed_result) -> Dict:
         """
-        Calculate compression statistics and efficiency metrics with accurate bit counting.
+        Calculate compression statistics and efficiency metrics with Shannon entropy analysis.
         
         Args:
             original_data: Original binary data
-            compressed_data: Compressed data
+            compressed_result: Either compressed data (List[int]) or complete result (Tuple[List[int], Dict])
             
         Returns:
-            Dictionary with compression statistics
+            Dictionary with compression statistics including entropy analysis
         """
         original_size = len(original_data)
+        
+        # Handle both direct compressed data and complete compression result
+        if isinstance(compressed_result, tuple):
+            compressed_data, metadata = compressed_result
+        else:
+            compressed_data = compressed_result
+            metadata = {}
         
         # More accurate size calculation: determine bits needed per code
         if compressed_data:
@@ -581,15 +617,60 @@ class CircularChromosomeCompressor:
         # Calculate DNA sequence length for bits per base calculation
         dna_length = original_size * 4  # 2 bits per base -> 4 bases per byte
         
+        # Calculate Shannon entropy and efficiency metrics
+        original_entropy = self._entropy(original_data)
+        
+        # For compressed entropy, we need to handle integer codes properly
+        if compressed_data:
+            # Convert integer codes to bytes representation for entropy calculation
+            compressed_bytes = []
+            for code in compressed_data:
+                # Convert each code to bytes (using little-endian encoding)
+                code_bytes = code.to_bytes((code.bit_length() + 7) // 8 or 1, 'little')
+                compressed_bytes.extend(code_bytes)
+            compressed_entropy = self._entropy(bytes(compressed_bytes))
+        else:
+            compressed_entropy = 0.0
+            
+        entropy_reduction = original_entropy - compressed_entropy
+        
+        theoretical_min_size = (original_entropy * original_size) / 8 if original_size > 0 else 0
+        shannon_efficiency = theoretical_min_size / compressed_size if compressed_size > 0 else 0
+        
+        # Compression effectiveness: how close we are to Shannon limit
+        actual_ratio = compressed_size / original_size if original_size > 0 else 0
+        shannon_ratio = theoretical_min_size / original_size if original_size > 0 else 0
+        
+        # Shannon efficiency: theoretical minimum vs actual compressed size
+        shannon_efficiency = theoretical_min_size / compressed_size if compressed_size > 0 else 0
+        
+        # Compression effectiveness: how well we approach theoretical limit
+        # 1.0 = achieved theoretical limit, 0.0 = no compression improvement over Shannon limit
+        if shannon_ratio > 0 and actual_ratio > shannon_ratio:
+            # We're worse than theoretical minimum - effectiveness between 0 and 1
+            compression_effectiveness = shannon_ratio / actual_ratio
+        elif shannon_ratio > 0 and actual_ratio <= shannon_ratio:
+            # We're at or better than theoretical minimum (impossible but handle gracefully)
+            compression_effectiveness = 1.0
+        else:
+            compression_effectiveness = 0.0
+        
         stats = {
             'original_size_bytes': original_size,
             'compressed_size_bytes': compressed_size,
-            'compression_ratio': compressed_size / original_size if original_size > 0 else 0,
-            'space_savings_percent': (1 - compressed_size / original_size) * 100 if original_size > 0 else 0,
+            'compression_ratio': actual_ratio,
+            'space_savings_percent': (1 - actual_ratio) * 100 if original_size > 0 else 0,
             'bits_per_base': (compressed_size * 8) / dna_length if dna_length > 0 else 0,
             'bits_per_code': bits_per_code,
             'total_codes': len(compressed_data),
-            'max_code_value': max(compressed_data) if compressed_data else 0
+            'max_code_value': max(compressed_data) if compressed_data else 0,
+            # Shannon entropy analysis
+            'original_entropy': original_entropy,
+            'compressed_entropy': compressed_entropy,
+            'entropy_reduction': entropy_reduction,
+            'theoretical_minimum_size': theoretical_min_size,
+            'shannon_efficiency': min(1.0, shannon_efficiency),  # Cap at 1.0
+            'compression_effectiveness': min(1.0, max(0.0, compression_effectiveness))  # Keep between 0.0 and 1.0
         }
         
         return stats

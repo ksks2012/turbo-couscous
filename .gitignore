@@ -33,6 +33,7 @@ var/**
 # temp
 pkg/**
 bak/**
+summary/**
 
 # Ignore test files
 *.txt
