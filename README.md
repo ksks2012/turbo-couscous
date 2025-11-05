@@ -12,7 +12,8 @@ Circular Chromosome Compression (CCC) is a bio-inspired data compression algorit
 4. **DNA storage optimization**: Target compression of ~1.5–2 bits/base
 5. **Layered architecture**: Modular design with separate core algorithm and encapsulation layers
 6. **Advanced error handling**: Dual-mode error handling (strict/lenient) with verbose debugging
-7. **Independent testing**: Each compression layer can be tested and optimized separately
+7. **Hash verification**: Automatic data integrity checking with SHA-256 hash validation
+8. **Independent testing**: Each compression layer can be tested and optimized separately
 
 ## Installation and Setup
 
@@ -171,6 +172,14 @@ The CCC algorithm uses a layered architecture for better modularity and debuggin
 - Performance scales well with file size (consistent throughput up to 100MB)
 - Excellent compression ratios for structured and repetitive data
 
+### Data Integrity & Hash Verification
+- **Automatic hash generation**: SHA-256 hash computed during compression
+- **Real-time verification**: Hash checked during decompression for corruption detection
+- **Multi-layer protection**: Integrity verification at encapsulation/decapsulation layers
+- **Configurable handling**: Strict mode (exception on mismatch) or lenient mode (warnings)
+- **Performance impact**: Minimal overhead (~0.1ms per operation)
+- **Hash format**: 8-character hexadecimal digest for metadata efficiency
+
 ### DNA Characteristics
 - **GC content**: Typically 50–60% (balanced distribution)
 - **Sequence length**: About 4× original data (2 bits per base)
@@ -283,6 +292,7 @@ recovered_codes = compressor.decapsulate(encap_data, encap_meta)
 - Circular hashing: avoids boundary effects  
 - LZW compression: pattern detection and replacement  
 - Error-correction codes: trans-splicing markers
+- Data integrity: SHA-256 hash verification for corruption detection
 - Layered design: separation of concerns and independent optimization
 
 ### Biological inspiration
