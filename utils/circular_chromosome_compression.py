@@ -81,6 +81,53 @@ class CircularChromosomeCompressor:
         
         self._log(f"Shannon entropy calculated: {entropy:.3f} bits/byte")
         return entropy
+    
+    def _compute_data_hash(self, data: List[int]) -> str:
+        """
+        Compute SHA-256 hash for data integrity verification.
+        
+        Args:
+            data: List of integer codes representing compressed data
+            
+        Returns:
+            8-character hexadecimal hash string
+        """
+        if not data:
+            return ""
+        
+        data_str = ','.join(str(x) for x in data)
+        return hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:8]
+    
+    def _verify_data_integrity(self, data: List[int], expected_hash: str, operation: str = "decompression") -> bool:
+        """
+        Verify data integrity using hash comparison.
+        
+        Args:
+            data: List of integer codes to verify
+            expected_hash: Expected hash value
+            operation: Operation context for error messages
+            
+        Returns:
+            True if hash matches, False or raises exception otherwise
+        """
+        if not expected_hash:
+            self._log(f"[CCC Warning] No hash available for {operation} integrity verification")
+            return False
+        
+        computed_hash = self._compute_data_hash(data)
+        
+        if computed_hash == expected_hash:
+            self._log(f"[CCC Info] Data integrity verified successfully for {operation}")
+            return True
+        else:
+            error_msg = f"Data integrity check failed during {operation}: hash mismatch (expected {expected_hash}, got {computed_hash})"
+            if self.strict_mode:
+                raise ValueError(error_msg)
+            else:
+                self._log(f"[CCC Warning] {error_msg}")
+                if self.verbose:
+                    print(f"[CCC Warning] {error_msg}")
+                return False
         
     def binary_to_dna(self, binary_data: bytes) -> Seq:
         """
@@ -320,8 +367,7 @@ class CircularChromosomeCompressor:
             return [], {'sl_marker_code': 0, 'chunk_size': self.chunk_size, 'original_length': 0, 'marker_positions': [], 'data_hash': '', 'original_compressed_length': 0}
             
         # Generate spliced leader marker that doesn't conflict with data
-        data_str = ','.join(str(x) for x in circular_data)
-        data_hash = hashlib.sha256(data_str.encode('utf-8')).hexdigest()[:8]
+        data_hash = self._compute_data_hash(circular_data)
         
         # Find a marker code that doesn't exist in the data
         max_value = max(circular_data) if circular_data else 0
@@ -452,6 +498,7 @@ class CircularChromosomeCompressor:
     def decapsulate(self, marked_data: List[int], encap_metadata: Dict) -> List[int]:
         """
         Decapsulation layer: Remove trans-splicing markers and circular encapsulation.
+        Includes hash verification for data integrity checking.
         
         Args:
             marked_data: Data with trans-splicing markers
@@ -478,11 +525,16 @@ class CircularChromosomeCompressor:
             # Get the encapsulated data (without trans-splicing markers)
             encapsulated_data = filtered_data[:original_length]
             
+            # Step 3: Hash verification for data integrity
+            stored_hash = ts_metadata.get('data_hash', '')
+            self._verify_data_integrity(encapsulated_data, stored_hash, "decapsulation")
+            
             # Extract only the original compressed data, excluding zero padding and bridge elements
             core_data = encapsulated_data[:original_compressed_length]
         else:
             # Fallback - shouldn't happen in normal cases
             core_data = filtered_data[:original_compressed_length] if original_compressed_length <= len(filtered_data) else filtered_data
+            self._log("[CCC Warning] Data length inconsistency detected during decapsulation")
         
         return core_data
     
