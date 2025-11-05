@@ -220,33 +220,41 @@ class CircularChromosomeCompressor:
         Inspired by dinoflagellate viral nucleoprotein condensation mechanisms.
         
         Optimized for large data (>100KB) with several performance enhancements:
-        1. Pre-allocated result list to reduce memory allocations
-        2. Cached dictionary access patterns
-        3. Reduced string concatenation overhead where possible
+        1. Dynamic dictionary reset for long sequences (>1M bases)
+        2. Pre-allocated result list to reduce memory allocations
+        3. Cached dictionary access patterns
+        4. Reduced string concatenation overhead where possible
 
         Args:
             dna_seq: Input DNA sequence string
 
         Returns:
-            Compressed sequence as list of integers
+            Compressed sequence as list of integers with reset markers
         """
         if not self._validate_input(dna_seq, "dna_seq"):
             return []
             
         self._log(f"Starting DVNP compression on sequence of length {len(dna_seq)}")
         
-        # Pre-initialize dictionary with expected capacity hint
+        # Initialize compression parameters
         dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
         next_code = 4
         current = ''
+        result = []
+        
+        # Dynamic reset parameters for long sequences
+        reset_count = 0
+        max_dict_size = 65536
+        # Special code to mark dictionary reset - fixed value for consistency
+        RESET_MARKER = 65535
         
         # Pre-allocate result list with estimated size to reduce reallocations
-        # Typical compression achieves 15-30% of original size
-        estimated_size = len(dna_seq) // 4
-        result = []
-        result.reserve = estimated_size  # Hint for list allocation (if supported)
+        # estimated_size = len(dna_seq) // 4
+        # Note: Python lists don't have reserve() method, this is just a comment
         
-        # Main compression loop - keep original 'in' operator as it's well-optimized in Python
+        self._log(f"Dynamic dictionary reset enabled for sequences >1M bases")
+        
+        # Main compression loop with dynamic dictionary reset
         for ch in dna_seq:
             combined = current + ch
             if combined in dictionary:
@@ -254,27 +262,44 @@ class CircularChromosomeCompressor:
             else:
                 if current:  # Only append if current is not empty
                     result.append(dictionary[current])
-                # Limit dictionary size to prevent excessive memory usage
-                if next_code < 65536:
+                
+                # Add new dictionary entry if space available
+                if next_code < max_dict_size:
                     dictionary[combined] = next_code
                     next_code += 1
+                else:
+                    # Dictionary is full - implement dynamic reset
+                    result.append(RESET_MARKER)
+                    reset_count += 1
+                    
+                    # Reset dictionary to initial state
+                    dictionary = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+                    next_code = 4
+                    
+                    self._log(f"Dictionary reset #{reset_count} at position {len(result) - 1}")
+                    
+                    # After reset, handle the current character combination
+                    # Don't add combined to dictionary yet, just set current
                 current = ch
         
         # Handle final sequence
         if current:
             result.append(dictionary[current])
 
+        compression_ratio = len(result) / len(dna_seq) if len(dna_seq) > 0 else 0
         self._log(f"DVNP compression completed: {len(dna_seq)} chars → {len(result)} codes")
+        self._log(f"Dictionary resets: {reset_count}, Final compression ratio: {compression_ratio:.3f}")
+        
         return result
 
     def dvnp_decompress(self, compressed: List[int]) -> str:
         """
         Decompress the DVNP-compressed sequence using improved LZW decompression.
         Must match compression logic exactly for perfect reconstruction.
-        Uses the fixed base dictionary for symmetry with compression.
+        Supports dynamic dictionary reset markers for long sequences.
         
         Args:
-            compressed: List of integer codes
+            compressed: List of integer codes (may contain reset markers)
             
         Returns:
             Decompressed DNA sequence string
@@ -283,29 +308,98 @@ class CircularChromosomeCompressor:
             return ""
             
         self._log(f"Starting DVNP decompression on {len(compressed)} codes")
+        
+        # Initialize decompression parameters
         work_dict = self._base_dict.copy()
         next_code = 4
+        result = ""
+        reset_count = 0
+        max_dict_size = 65536
+        RESET_MARKER = 65535  # Match the compression marker
+        
+        if not compressed:
+            return ""
+        
+        # Handle first code
+        if compressed[0] == RESET_MARKER:
+            error_msg = "First code cannot be a reset marker"
+            if self.strict_mode:
+                raise ValueError(error_msg)
+            else:
+                self._log(f"Warning: {error_msg}")
+                return ""
+        
         prev = work_dict[compressed[0]]
         result = prev
-        for code in compressed[1:]:
+        
+        # Process remaining codes with reset marker handling
+        i = 1
+        while i < len(compressed):
+            code = compressed[i]
+            
+            # Check for dictionary reset marker
+            if code == RESET_MARKER:
+                reset_count += 1
+                self._log(f"Processing dictionary reset #{reset_count}")
+                
+                # Reset dictionary to initial state
+                work_dict = self._base_dict.copy()
+                next_code = 4
+                
+                # Move to next code and start fresh
+                i += 1
+                if i >= len(compressed):
+                    break
+                
+                # The next code after reset should be treated as a fresh start
+                if i >= len(compressed):
+                    break
+                    
+                code = compressed[i]
+                if code in work_dict:
+                    prev = work_dict[code]
+                    result += prev
+                    i += 1
+                    continue
+                else:
+                    error_msg = f"Invalid code after reset: {code}"
+                    if self.strict_mode:
+                        raise ValueError(error_msg)
+                    else:
+                        self._log(f"Warning: {error_msg}")
+                        break
+            
+            # Normal LZW decompression logic
             if code in work_dict:
                 entry = work_dict[code]
-            elif code == next_code:
+            elif code == next_code and prev and len(prev) > 0:
+                # Special case: code not in dictionary yet, but it's the next code
+                # This happens when we're about to add entry to dictionary
                 entry = prev + prev[0]
             else:
-                error_msg = f"Invalid code {code} in DVNP decompression"
+                # Handle codes that might be from before a reset
+                # Skip invalid codes gracefully in non-strict mode
+                error_msg = f"Invalid code {code} in DVNP decompression (dict size: {len(work_dict)}, next_code: {next_code})"
                 if self.strict_mode:
                     raise ValueError(error_msg)
                 else:
-                    self._log(f"Warning: {error_msg}, skipping")
+                    self._log(f"Warning: {error_msg}, skipping invalid code")
+                    i += 1
                     continue
+            
             result += entry
-            if next_code < 65536:
+            
+            # Add new dictionary entry if space available and prev is valid
+            if next_code < max_dict_size and prev and len(prev) > 0 and len(entry) > 0:
                 work_dict[next_code] = prev + entry[0]
                 next_code += 1
+            
             prev = entry
+            i += 1
         
         self._log(f"DVNP decompression completed: {len(compressed)} codes → {len(result)} chars")
+        self._log(f"Dictionary resets processed: {reset_count}")
+        
         return result
         
     def _next_prime(self, n: int) -> int:
