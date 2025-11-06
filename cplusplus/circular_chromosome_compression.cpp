@@ -394,6 +394,23 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
             }
             
             code = compressed[i];
+            // Handle consecutive reset markers by checking again
+            while (code == RESET_MARKER && i < compressed.size()) {
+                reset_count++;
+                log("Processing consecutive dictionary reset #" + std::to_string(reset_count));
+                
+                // Dictionary is already reset, just move to next code
+                i++;
+                if (i >= compressed.size()) {
+                    break;
+                }
+                code = compressed[i];
+            }
+            
+            if (i >= compressed.size()) {
+                break;
+            }
+            
             if (work_dict.find(code) != work_dict.end()) {
                 prev = work_dict[code];
                 result += prev;
