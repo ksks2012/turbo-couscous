@@ -32,7 +32,8 @@ var/**
 
 # temp
 pkg/**
-bak/**
+**/bak/**
+**backup**
 summary/**
 
 # Ignore test files

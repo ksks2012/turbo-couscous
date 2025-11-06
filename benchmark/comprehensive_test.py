@@ -30,7 +30,7 @@ def create_test_data(size: int, pattern: str = 'random') -> bytes:
 
 def run_comprehensive_tests():
     """Run comprehensive correctness and performance tests."""
-    compressor = CircularChromosomeCompressor()
+    compressor = CircularChromosomeCompressor(strict_mode=False)  # Use non-strict mode
     
     print("=== CCC Algorithm Comprehensive Test Suite ===")
     print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
