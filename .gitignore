@@ -41,4 +41,13 @@ pkg/**
 *.ccc
 *.fasta
 
+# Build files for cplusplus
+**/CMakeFiles/**
+**/Makefile
+**/ccc_example
+**/test_ccc
+**/ccc.pc
+**/*.a
+**/*.cmake
+**/large_file_benchmark
 !**/CMakeLists.txt
