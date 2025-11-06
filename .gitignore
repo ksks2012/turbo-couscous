@@ -34,9 +34,11 @@ var/**
 pkg/**
 **/bak/**
 **backup**
-summary/**
+**/summary/**
 
 # Ignore test files
 *.txt
 *.ccc
 *.fasta
+
+!**/CMakeLists.txt
