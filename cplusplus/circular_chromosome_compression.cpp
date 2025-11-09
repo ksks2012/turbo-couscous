@@ -265,21 +265,21 @@ std::vector<int> CircularChromosomeCompressor::dvnp_compress(const std::string& 
     
     log("Starting DVNP compression on sequence of length " + std::to_string(dna_seq.length()));
     
-    // Initialize compression parameters
-    std::unordered_map<std::string, int> dictionary;
-    dictionary["A"] = 0;
-    dictionary["C"] = 1;
-    dictionary["G"] = 2;
-    dictionary["T"] = 3;
+    // Initialize compression parameters with uint32_t for safer code space
+    std::unordered_map<std::string, uint32_t> dictionary;
+    dictionary["A"] = 0u;
+    dictionary["C"] = 1u;
+    dictionary["G"] = 2u;
+    dictionary["T"] = 3u;
     
-    int next_code = 4;
+    uint32_t next_code = 4u;
     std::string current = "";
-    std::vector<int> result;
+    std::vector<uint32_t> result;
     
     // Dynamic reset parameters for long sequences
-    int reset_count = 0;
-    const int max_dict_size = 65536;
-    const int RESET_MARKER = 65535;
+    uint32_t reset_count = 0u;
+    const uint32_t max_dict_size = 65536u;        // allowed codes: 0 .. max_dict_size-1
+    const uint32_t RESET_MARKER = max_dict_size;  // marker is outside valid code range
     
     log("Dynamic dictionary reset enabled for sequences >1M bases");
     
@@ -329,7 +329,14 @@ std::vector<int> CircularChromosomeCompressor::dvnp_compress(const std::string& 
     log("Dictionary resets: " + std::to_string(reset_count) + 
         ", Final compression ratio: " + std::to_string(compression_ratio));
     
-    return result;
+    // Convert uint32_t result to int vector for API compatibility
+    std::vector<int> int_result;
+    int_result.reserve(result.size());
+    for (uint32_t code : result) {
+        int_result.push_back(static_cast<int>(code));
+    }
+    
+    return int_result;
 }
 
 std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>& compressed) {
@@ -341,24 +348,25 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
     
     log("Starting DVNP decompression on " + std::to_string(compressed.size()) + " codes");
     
-    // Initialize decompression parameters
-    std::unordered_map<int, std::string> work_dict;
+    // Initialize decompression parameters with uint32_t for safer code space
+    std::unordered_map<uint32_t, std::string> work_dict;
     for (const auto& pair : base_dict_) {
-        work_dict[pair.first] = std::string(1, pair.second);
+        work_dict[static_cast<uint32_t>(pair.first)] = std::string(1, pair.second);
     }
     
-    int next_code = 4;
+    uint32_t next_code = 4u;
     std::string result = "";
-    int reset_count = 0;
-    const int max_dict_size = 65536;
-    const int RESET_MARKER = 65535;
+    uint32_t reset_count = 0u;
+    const uint32_t max_dict_size = 65536u;        // allowed codes: 0 .. max_dict_size-1
+    const uint32_t RESET_MARKER = max_dict_size;  // marker is outside valid code range
     
     if (compressed.empty()) {
         return "";
     }
     
-    // Handle first code
-    if (compressed[0] == RESET_MARKER) {
+    // Handle first code (convert to uint32_t for consistent handling)
+    uint32_t first_code = static_cast<uint32_t>(compressed[0]);
+    if (first_code == RESET_MARKER) {
         std::string error_msg = "First code cannot be a reset marker";
         if (strict_mode_) {
             throw std::invalid_argument(error_msg);
@@ -368,12 +376,12 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
         }
     }
     
-    std::string prev = work_dict[compressed[0]];
+    std::string prev = work_dict[first_code];
     result = prev;
     
     // Process remaining codes with reset marker handling
     for (size_t i = 1; i < compressed.size(); ++i) {
-        int code = compressed[i];
+        uint32_t code = static_cast<uint32_t>(compressed[i]);
         
         // Check for dictionary reset marker
         if (code == RESET_MARKER) {
@@ -393,7 +401,7 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
                 break;
             }
             
-            code = compressed[i];
+            code = static_cast<uint32_t>(compressed[i]);
             // Handle consecutive reset markers by checking again
             while (code == RESET_MARKER && i < compressed.size()) {
                 reset_count++;
@@ -404,7 +412,7 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
                 if (i >= compressed.size()) {
                     break;
                 }
-                code = compressed[i];
+                code = static_cast<uint32_t>(compressed[i]);
             }
             
             if (i >= compressed.size()) {
@@ -414,6 +422,7 @@ std::string CircularChromosomeCompressor::dvnp_decompress(const std::vector<int>
             if (work_dict.find(code) != work_dict.end()) {
                 prev = work_dict[code];
                 result += prev;
+                // After reset, start fresh with new prev - no dictionary building with old prev
                 continue;
             } else {
                 std::string error_msg = "Invalid code after reset: " + std::to_string(code);
