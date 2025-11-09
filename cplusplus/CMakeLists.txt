@@ -60,7 +60,7 @@ endif()
 # Test executable
 option(BUILD_TESTS "Build test programs" ON)
 if(BUILD_TESTS)
-    add_executable(test_ccc test_ccc_cpp.cpp)
+    add_executable(test_ccc ./tests/test_ccc_cpp.cpp)
     target_link_libraries(test_ccc ccc_static)
     set_target_properties(test_ccc PROPERTIES
         OUTPUT_NAME test_ccc
@@ -78,6 +78,16 @@ if(BUILD_EXAMPLES)
     target_link_libraries(ccc_example ccc_static)
     set_target_properties(ccc_example PROPERTIES
         OUTPUT_NAME ccc_example
+    )
+endif()
+
+# Benchmark executables
+option(BUILD_BENCHMARKS "Build benchmark programs" ON)
+if(BUILD_BENCHMARKS)
+    add_executable(large_file_benchmark large_file_benchmark.cpp)
+    target_link_libraries(large_file_benchmark ccc_static)
+    set_target_properties(large_file_benchmark PROPERTIES
+        OUTPUT_NAME large_file_benchmark
     )
 endif()
 
@@ -115,6 +125,12 @@ if(INSTALL_CCC)
     
     if(BUILD_EXAMPLES)
         install(TARGETS ccc_example
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
+    
+    if(BUILD_BENCHMARKS)
+        install(TARGETS large_file_benchmark
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
     endif()
